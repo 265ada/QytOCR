@@ -599,6 +599,35 @@ static class T
                               + $"  bridge: {bridge + 1}ms ago no longer bridges");
         }
 
+        // Whether a single missed window lookup should actually pause the OCR
+        // reader, or just be a blink the debounce absorbs. Pausing on one
+        // poll's miss cost up to a second of frozen reading the instant it
+        // landed mid-fight; only a window genuinely gone for a while should.
+        {
+            const long grace = MonitorEngine.GameGoneGraceMs;
+            bool foundNow = MonitorEngine.StillCountsAsRunning(
+                true, long.MinValue / 2, 10_000, grace);
+            bool justMissed = MonitorEngine.StillCountsAsRunning(
+                false, 9_900, 10_000, grace);
+            bool rightAtTheEdge = MonitorEngine.StillCountsAsRunning(
+                false, 10_000 - grace, 10_000, grace);
+            bool pastTheEdge = MonitorEngine.StillCountsAsRunning(
+                false, 10_000 - grace - 1, 10_000, grace);
+            bool neverSeen = MonitorEngine.StillCountsAsRunning(
+                false, long.MinValue / 2, 10_000, grace);
+
+            Console.WriteLine((foundNow ? "PASS" : "FAIL")
+                              + "  game-gone: found this poll -> counts as running");
+            Console.WriteLine((justMissed ? "PASS" : "FAIL")
+                              + "  game-gone: missed 100ms ago -> still counts as running");
+            Console.WriteLine((rightAtTheEdge ? "PASS" : "FAIL")
+                              + $"  game-gone: gone exactly {grace}ms -> still counts as running");
+            Console.WriteLine((!pastTheEdge ? "PASS" : "FAIL")
+                              + $"  game-gone: gone {grace + 1}ms -> no longer counts as running");
+            Console.WriteLine((!neverSeen ? "PASS" : "FAIL")
+                              + "  game-gone: never seen at all (sentinel) -> not running");
+        }
+
         // Whether the overlay should still treat a quiet numbers box as a menu
         // covering the HUD rather than give up and show anyway. A box that has
         // never read at all never counts as covered (nothing to be patient

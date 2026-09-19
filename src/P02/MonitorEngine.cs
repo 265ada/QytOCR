@@ -884,6 +884,7 @@ public sealed class MonitorEngine : IDisposable
 
         double lastLife = -1;
         long lastDropMs = long.MinValue / 2;
+        long gameGoneAtMs = long.MinValue / 2;
 
         // Without this the scheduler rounds every sleep up to ~15 ms, which
         // caps the loop near 60 Hz no matter what poll rate is asked for.
@@ -902,6 +903,9 @@ public sealed class MonitorEngine : IDisposable
                 // second whether or not the game was even running.
                 nint gameWnd = Native.FindWindow(_cfg.WindowMatch, out Rectangle gameRect);
                 bool gameRunning = gameWnd != 0;
+
+                if (gameRunning) gameGoneAtMs = long.MinValue / 2;
+                else if (gameGoneAtMs == long.MinValue / 2) gameGoneAtMs = t0;
 
                 // Both maxima go to the search every pass, whether or not that
                 // globe is switched on. Life alone does not identify the
@@ -1080,7 +1084,8 @@ public sealed class MonitorEngine : IDisposable
                 // loses its address, these are what is left, and a reading two
                 // seconds old is one that has to be waited for.
                 _ocr.SetInterval(_lifeMemConfirmed ? 1500 : nearTrouble ? 60 : 160);
-                _ocr.SetGameRunning(gameRunning);
+                _ocr.SetGameRunning(StillCountsAsRunning(gameRunning, gameGoneAtMs, t0,
+                                                         GameGoneGraceMs));
 
                 bool fighting = t0 - lastDropMs < _cfg.CombatGraceMs;
                 if (fighting != InCombat)
@@ -1253,6 +1258,27 @@ public sealed class MonitorEngine : IDisposable
     /// </summary>
     internal static bool SafetyNetMayBridge(long lastTrustedAtMs, long nowMs, long bridgeMs)
         => lastTrustedAtMs != long.MinValue / 2 && nowMs - lastTrustedAtMs <= bridgeMs;
+
+    /// <summary>
+    /// How long the game's window may go missing from one poll's lookup
+    /// before the OCR reader is actually told to stop and pause. Native
+    /// window enumeration is not perfectly reliable every single tick - an
+    /// alt-tab, a loading screen, a moment of desktop churn - and pausing on
+    /// one missed poll costs up to a second of frozen reading the instant it
+    /// happens to land mid-fight. Long closures still pause it; a blink does
+    /// not.
+    /// </summary>
+    internal const long GameGoneGraceMs = 3000;
+
+    /// <summary>
+    /// Whether the OCR reader should still be told the game is running, given
+    /// this poll's own window lookup and how long ago the window was last
+    /// actually seen. <paramref name="goneAtMs"/> is the sentinel
+    /// (long.MinValue/2) whenever the window is currently found.
+    /// </summary>
+    internal static bool StillCountsAsRunning(bool foundThisPoll, long goneAtMs, long nowMs,
+                                              long graceMs)
+        => foundThisPoll || (goneAtMs != long.MinValue / 2 && nowMs - goneAtMs <= graceMs);
 
     /// <summary>What to do when memory and the numbers name different maxima.</summary>
     internal enum Verdict
