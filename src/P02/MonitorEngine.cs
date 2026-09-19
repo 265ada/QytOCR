@@ -1362,6 +1362,24 @@ public sealed class MonitorEngine : IDisposable
 
     /// <summary>Whether this pool's numbers have produced a reading recently.</summary>
     /// <summary>
+    /// Whether any watched pool has a text region actually in play - the
+    /// question HudVisible needs answered, and one that used to only ever be
+    /// asked of Life.
+    ///
+    /// A player who switches "Watch my life" off while still watching mana
+    /// found the overlay permanently gone: Life's OCR slot is torn down the
+    /// moment it is disabled, so a check that only ever looked at Life saw
+    /// nothing to read, forever, and fell straight into the "a menu must be
+    /// covering it" branch - for a HUD that was never covered, reading a pool
+    /// nobody had asked it to watch in the first place.
+    /// </summary>
+    internal static bool AnyPoolWatchedWithText(WatcherConfig life, WatcherConfig mana,
+                                                WatcherConfig shield)
+        => (life.Enabled && life.UseText && life.TextRegion.IsValid)
+           || (mana.Enabled && mana.UseText && mana.TextRegion.IsValid)
+           || (shield.Enabled && shield.UseText && shield.TextRegion.IsValid);
+
+    /// <summary>
     /// Whether the game's own HUD numbers are on screen right now.
     ///
     /// Asked so the overlay can get out of the way when a shop, the passive
@@ -1380,10 +1398,14 @@ public sealed class MonitorEngine : IDisposable
     {
         get
         {
-            var c = _cfg.Life;
-            if (!c.UseText || !c.TextRegion.IsValid || !_ocr.Available) return true;
+            if (!_ocr.Available) return true;
+            if (!AnyPoolWatchedWithText(_cfg.Life, _cfg.Mana, _cfg.Shield)) return true;
 
-            if (NumbersReading("Life")) { _hudSeenMs = _ocr.NowMs; return true; }
+            // A disabled pool's OCR slot does not exist - Configure() removed
+            // it - so asking for one costs nothing and simply never matches.
+            // No need to re-check Enabled here on top of that.
+            foreach (string name in new[] { "Life", "Mana", "Shield" })
+                if (NumbersReading(name)) { _hudSeenMs = _ocr.NowMs; return true; }
 
             // The numbers being gone is only evidence of a menu if something
             // else can still see your character.

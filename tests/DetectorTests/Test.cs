@@ -599,6 +599,35 @@ static class T
                               + $"  bridge: {bridge + 1}ms ago no longer bridges");
         }
 
+        // Whether the overlay's "is the HUD visible" check looks at whatever
+        // is actually being watched, rather than always asking about Life.
+        // Disabling "Watch my life" while mana stayed on used to leave the
+        // overlay convinced a menu was covering the HUD forever, because the
+        // check only ever asked about Life's own numbers.
+        {
+            WatcherConfig On() => new() { Enabled = true, UseText = true,
+                                          TextRegion = Box.From(new Rectangle(0, 0, 40, 20)) };
+            WatcherConfig Off() => new() { Enabled = false };
+
+            bool lifeOnly = MonitorEngine.AnyPoolWatchedWithText(On(), Off(), Off());
+            bool manaOnlyLifeDisabled = MonitorEngine.AnyPoolWatchedWithText(Off(), On(), Off());
+            bool shieldOnly = MonitorEngine.AnyPoolWatchedWithText(Off(), Off(), On());
+            bool noneWatched = MonitorEngine.AnyPoolWatchedWithText(Off(), Off(), Off());
+            bool enabledButNoRegion = MonitorEngine.AnyPoolWatchedWithText(
+                new WatcherConfig { Enabled = true, UseText = true }, Off(), Off());
+
+            Console.WriteLine((lifeOnly ? "PASS" : "FAIL")
+                              + "  hud-watch: life alone watched with text -> counts");
+            Console.WriteLine((manaOnlyLifeDisabled ? "PASS" : "FAIL")
+                              + "  hud-watch: life disabled, mana watched with text -> still counts");
+            Console.WriteLine((shieldOnly ? "PASS" : "FAIL")
+                              + "  hud-watch: shield alone watched with text -> counts");
+            Console.WriteLine((!noneWatched ? "PASS" : "FAIL")
+                              + "  hud-watch: nothing watched -> does not count");
+            Console.WriteLine((!enabledButNoRegion ? "PASS" : "FAIL")
+                              + "  hud-watch: enabled but no region drawn yet -> does not count");
+        }
+
         // Whether a single missed window lookup should actually pause the OCR
         // reader, or just be a blink the debounce absorbs. Pausing on one
         // poll's miss cost up to a second of frozen reading the instant it
