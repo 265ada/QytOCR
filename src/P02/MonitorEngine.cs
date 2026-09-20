@@ -158,7 +158,15 @@ public sealed class MonitorEngine : IDisposable
                                && _cfg.Life.TextRegion.IsValid
             ? _cfg.Life.TextRegion.ToRect() : null,
             _cfg.Life.TextLabel, _cfg.Life.KnownMax);
-        _ocr.Configure("Shield", _cfg.Shield.UseText && _cfg.Shield.Enabled
+        // Low Life setup reads shield without Shield.Enabled ever being true
+        // - see Sample()'s entry gate - so it needs its own way in here too,
+        // or the OCR reader never even gets told to look at shield's region
+        // at all: "numbers not on screen", forever, because nothing was
+        // ever asking. This is the one place that bug actually lived; every
+        // other generalization for Low Life setup was downstream of shield
+        // having a real reading to work with in the first place.
+        _ocr.Configure("Shield", _cfg.Shield.UseText
+                                 && (_cfg.Shield.Enabled || _cfg.LowLifeEnabled)
                                  && _cfg.Shield.TextRegion.IsValid
             ? _cfg.Shield.TextRegion.ToRect() : null,
             _cfg.Shield.TextLabel, _cfg.Shield.KnownMax);
@@ -922,7 +930,7 @@ public sealed class MonitorEngine : IDisposable
                         if (gamePid != 0) _mem.PreferredPid = (int)gamePid;
                     }
 
-                    if (_cfg.Shield.Enabled && _cfg.Shield.KnownMax <= 0
+                    if ((_cfg.Shield.Enabled || _cfg.LowLifeEnabled) && _cfg.Shield.KnownMax <= 0
                         && _mem.TryGet(out var es) && es.MaxEs > 0)
                     {
                         _cfg.Shield.KnownMax = es.MaxEs;
@@ -1145,7 +1153,8 @@ public sealed class MonitorEngine : IDisposable
                     lastLogMs = t0;
                     Log.Write($"watch  life {lr.Fraction:P1}{(_cfg.Life.Enabled ? "" : " (off)")}" +
                               $"  mana {mr.Fraction:P1}{(_cfg.Mana.Enabled ? "" : " (off)")}" +
-                              (_cfg.Shield.Enabled ? $"  shield {sr.Fraction:P1}" : "") +
+                              (_cfg.Shield.Enabled || _cfg.LowLifeEnabled
+                                  ? $"  shield {sr.Fraction:P1}" : "") +
                               $"  focused={focused}  hz={ActualHz}  " +
                               $"skipped={_keys.Skipped}  poll={LastPollMs:0.0}ms");
                 }
