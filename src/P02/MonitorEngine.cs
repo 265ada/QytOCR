@@ -1052,6 +1052,18 @@ public sealed class MonitorEngine : IDisposable
                 var mr = Sample(mana, _cfg.Mana, "Mana", focused, clock, gameRunning);
                 var sr = Sample(shield, _cfg.Shield, "Shield", focused, clock, gameRunning);
 
+                if (_cfg.LowLifeEnabled)
+                {
+                    if (!_lowLifeWasEnabled) ResetLowLifeTiers();
+                    _lowLifeWasEnabled = true;
+
+                    // Same bar every other press in this app has to clear:
+                    // only while armed, and only while the game is actually
+                    // focused.
+                    if (Armed && focused) LowLifeCheck(sr, t0);
+                }
+                else _lowLifeWasEnabled = false;
+
                 // A fight is life going down. Regeneration and leech send it up
                 // constantly, so a rise says nothing was hitting you - only a
                 // drop does.
@@ -1068,7 +1080,13 @@ public sealed class MonitorEngine : IDisposable
                     (lr.Ok && _cfg.Life.Enabled && lr.Fraction < _cfg.Life.Threshold + 0.15)
                     || (mr.Ok && _cfg.Mana.Enabled && mr.Fraction < _cfg.Mana.Threshold + 0.15)
                     || (sr.Ok && _cfg.Shield.Enabled
-                        && sr.Fraction < _cfg.Shield.Threshold + 0.15);
+                        && sr.Fraction < _cfg.Shield.Threshold + 0.15)
+                    // Low Life setup reads shield instead, so it is shield's
+                    // own first floor - not shield's Threshold, which does
+                    // not apply while this owns the trigger - that says when
+                    // reading needs to speed up.
+                    || (sr.Ok && _cfg.LowLifeEnabled
+                        && sr.Fraction < _cfg.LowLifeTier1 + 0.15);
                 // Once memory is confirmed it decides everything, and the
                 // numbers are only there to catch it pointing at the wrong
                 // thing. Reading them several times a second for that is what
@@ -1280,6 +1298,43 @@ public sealed class MonitorEngine : IDisposable
                                               long graceMs)
         => foundThisPoll || (goneAtMs != long.MinValue / 2 && nowMs - goneAtMs <= graceMs);
 
+    /// <summary>
+    /// Whether a Low Life tier may fire: it has not already fired since it
+    /// last recovered, and the reading has actually crossed its floor. Mirrors
+    /// the shape of the app's other emergency nets - one press per crossing,
+    /// not a repeat trigger - applied to shield's reading instead of the
+    /// pool's own.
+    /// </summary>
+    internal static bool LowLifeTierMayFire(bool alreadyFired, double frac, double floor)
+        => !alreadyFired && frac <= floor;
+
+    /// <summary>
+    /// The same five-point margin the existing emergency nets rearm on, so a
+    /// reading sitting exactly on a floor cannot flap a tier on and off every
+    /// single poll.
+    /// </summary>
+    internal const double LowLifeRearmMargin = 0.05;
+
+    /// <summary>Whether a fired tier has recovered enough to be armed again.</summary>
+    internal static bool LowLifeTierRearmed(double frac, double floor)
+        => frac > floor + LowLifeRearmMargin;
+
+    /// <summary>
+    /// How long shield must have read at or below the zero tier, genuinely,
+    /// before that floor is trusted enough to fire.
+    /// </summary>
+    internal const long LowLifeZeroConfirmMs = 300;
+
+    /// <summary>
+    /// Whether shield has stayed at or below the zero tier long enough to
+    /// trust it, rather than having only just arrived there on the one frame
+    /// being looked at right now - a raw single-frame zero is exactly what a
+    /// misread or a covered, blind globe looks like too, and this app has
+    /// been burned by treating one as truth before.
+    /// </summary>
+    internal static bool LowLifeZeroConfirmed(long belowSinceMs, long nowMs, long confirmMs)
+        => belowSinceMs != long.MinValue / 2 && nowMs - belowSinceMs >= confirmMs;
+
     /// <summary>What to do when memory and the numbers name different maxima.</summary>
     internal enum Verdict
     {
@@ -1374,10 +1429,16 @@ public sealed class MonitorEngine : IDisposable
     /// nobody had asked it to watch in the first place.
     /// </summary>
     internal static bool AnyPoolWatchedWithText(WatcherConfig life, WatcherConfig mana,
-                                                WatcherConfig shield)
+                                                WatcherConfig shield,
+                                                bool lowLifeEnabled = false)
         => (life.Enabled && life.UseText && life.TextRegion.IsValid)
            || (mana.Enabled && mana.UseText && mana.TextRegion.IsValid)
-           || (shield.Enabled && shield.UseText && shield.TextRegion.IsValid);
+           // Low Life setup reads shield without shield's own Enabled ever
+           // being on - see the entry gate in Sample() - so it needs its own
+           // way in here too, or the overlay goes back to thinking a menu is
+           // covering a HUD it is reading just fine.
+           || ((shield.Enabled || lowLifeEnabled) && shield.UseText
+               && shield.TextRegion.IsValid);
 
     /// <summary>
     /// Whether the game's own HUD numbers are on screen right now.
@@ -1399,7 +1460,8 @@ public sealed class MonitorEngine : IDisposable
         get
         {
             if (!_ocr.Available) return true;
-            if (!AnyPoolWatchedWithText(_cfg.Life, _cfg.Mana, _cfg.Shield)) return true;
+            if (!AnyPoolWatchedWithText(_cfg.Life, _cfg.Mana, _cfg.Shield, _cfg.LowLifeEnabled))
+                return true;
 
             // A disabled pool's OCR slot does not exist - Configure() removed
             // it - so asking for one costs nothing and simply never matches.
@@ -1441,6 +1503,95 @@ public sealed class MonitorEngine : IDisposable
         }
     }
 
+    // --- Low Life setup: an "oh shit" net keyed off shield, firing life ----
+
+    private bool _lowLifeTier1Fired, _lowLifeTier2Fired, _lowLifeTier3Fired;
+    private long _lowLifeZeroSinceMs = long.MinValue / 2;
+    private bool _lowLifeWasEnabled;
+
+    /// <summary>
+    /// Every tier armed, fresh. Run once whenever Low Life setup goes from
+    /// off to on - including the moment the app starts up already enabled -
+    /// so a tier that fired in an earlier session, or before it was switched
+    /// off and back on mid-fight, cannot silently skip protection now just
+    /// because shield never happened to climb back out in between.
+    /// </summary>
+    private void ResetLowLifeTiers()
+    {
+        _lowLifeTier1Fired = _lowLifeTier2Fired = _lowLifeTier3Fired = false;
+        _lowLifeZeroSinceMs = long.MinValue / 2;
+    }
+
+    /// <summary>
+    /// Watches shield's own reading (produced by Sample("Shield", ...), which
+    /// Low Life setup keeps running through the entry gate above) and fires
+    /// the life flask at three floors, each once per crossing. Entirely
+    /// separate from shield's own threshold/panic/emergency-net firing, which
+    /// is suppressed for the whole time this is on - see the early return
+    /// for "Shield" inside Sample() itself.
+    /// </summary>
+    private void LowLifeCheck(GlobeReading shield, long now)
+    {
+        if (!shield.Ok)
+        {
+            // Nothing to judge by. Left armed rather than reset, so a real
+            // reading resuming a moment later does not find every tier
+            // freshly rearmed and able to double-fire on a level it was
+            // already sitting under before the gap.
+            _lowLifeZeroSinceMs = long.MinValue / 2;
+            return;
+        }
+
+        double frac = shield.Fraction;
+
+        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier1)) _lowLifeTier1Fired = false;
+        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier2)) _lowLifeTier2Fired = false;
+        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier3)) _lowLifeTier3Fired = false;
+
+        if (frac <= _cfg.LowLifeTier3)
+        {
+            if (_lowLifeZeroSinceMs == long.MinValue / 2) _lowLifeZeroSinceMs = now;
+        }
+        else _lowLifeZeroSinceMs = long.MinValue / 2;
+
+        // Lowest floor first: falling through all three in one gap between
+        // polls is a real thing a big hit does, and it is the deepest one
+        // that actually matters at that point.
+        if (LowLifeTierMayFire(_lowLifeTier3Fired, frac, _cfg.LowLifeTier3)
+            && LowLifeZeroConfirmed(_lowLifeZeroSinceMs, now, LowLifeZeroConfirmMs))
+        {
+            _lowLifeTier3Fired = true;
+            FireLowLife("shield depleted", frac);
+            return;
+        }
+
+        if (LowLifeTierMayFire(_lowLifeTier2Fired, frac, _cfg.LowLifeTier2))
+        {
+            _lowLifeTier2Fired = true;
+            FireLowLife("shield's second floor", frac);
+            return;
+        }
+
+        if (LowLifeTierMayFire(_lowLifeTier1Fired, frac, _cfg.LowLifeTier1))
+        {
+            _lowLifeTier1Fired = true;
+            FireLowLife("shield's first floor", frac);
+        }
+    }
+
+    private void FireLowLife(string why, double shieldFrac)
+    {
+        if (!_keys.Send(_cfg.Life.Key, _cfg.Life.HoldMs, 1, 40, PostingKeys, GameWindow,
+                        PadFor(_cfg.Life), _cfg.UseController && _cfg.AlsoPressKey))
+            return;
+
+        FiresThisFight++;
+        lock (_firesByPool) _firesByPool["Life"] = FiresThisFightFor("Life") + 1;
+        if (_cfg.SoundOnFire) _chime.Play(_cfg.SoundGapMs);
+        Log.Write($"Low life setup: '{_cfg.Life.Key}' x1 - {why} at {shieldFrac:P1}");
+        Fired?.Invoke("Life", shieldFrac);
+    }
+
     /// <summary>
     /// How long a covered HUD is trusted to still be a menu rather than a
     /// broken setup. Fifteen minutes comfortably outlasts a crafting or
@@ -1472,7 +1623,14 @@ public sealed class MonitorEngine : IDisposable
         // Switched off means not looked at. Capturing costs about 9 ms whatever
         // the region size, so reading a globe nobody asked about was spending
         // half the loop's budget to update a number that changes nothing.
-        if (!c.Enabled)
+        //
+        // Shield is the one exception: Low Life setup fires life's flask off
+        // shield's own reading without shield's own "Enabled" ever being on,
+        // so shield still needs reading here even then. It is read through
+        // this exact trusted pipeline either way - only which firing logic
+        // gets to act on it differs, decided further down.
+        bool trackedAnyway = name == "Shield" && _cfg.LowLifeEnabled;
+        if (!c.Enabled && !trackedAnyway)
         {
             st.Below = 0;
             st.Reset();
@@ -2410,6 +2568,17 @@ public sealed class MonitorEngine : IDisposable
 
         st.LastTrustedFrac = frac;
         st.LastTrustedAtMs = now;
+
+        // Low Life setup reads shield through every trust check above -
+        // bridging, memory cross-check, all of it - but fires the life flask
+        // through its own three-tier check elsewhere, not through shield's
+        // own threshold, panic or emergency nets below. The two checkboxes
+        // are mutually exclusive in the UI for exactly this reason: shield's
+        // own firing logic and Low Life setup's must never both be live at
+        // once, or the same drop in shield could press twice from two
+        // separate systems.
+        if (name == "Shield" && _cfg.LowLifeEnabled)
+            return new GlobeReading(name, frac, true, "", fromText, textRaw);
 
         // The safety net: one press, once, when you fall past the floor.
         //

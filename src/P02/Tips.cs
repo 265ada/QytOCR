@@ -503,6 +503,52 @@ internal static class Tips
         "time in both directions.",
     ];
 
+    public static readonly string[] LowLifeOn =
+    [
+        "A separate \"oh shit\" net for a low-life build: energy shield is the",
+        "pool that actually absorbs hits, and its own three floors below say",
+        "when to drink the life flask - not shield's own threshold.",
+        "",
+        "Mutually exclusive with \"Also fire for energy shield\": that one",
+        "assumes the flask refills shield directly. This one does not touch",
+        "shield at all - it reads shield only to decide when life needs a",
+        "flask before the hit that empties it reaches life itself. Turning",
+        "this on turns that one off.",
+        "",
+        "Each floor fires once and stays quiet until shield has climbed back",
+        "out, the same as the emergency and last-ditch nets elsewhere. It uses",
+        "your life flask's key.",
+        "",
+        "While this is on, the overlay shows energy shield where life normally",
+        "goes, since shield is the number actually worth watching here.",
+    ];
+
+    public static readonly string[] LowLifeTier1 =
+    [
+        "First warning: one press when shield first drops below this.",
+        "",
+        "Set it high enough to catch a shield that is falling before it is",
+        "actually in danger - this is the least urgent of the three floors.",
+    ];
+
+    public static readonly string[] LowLifeTier2 =
+    [
+        "Second floor, further down: one more press.",
+        "",
+        "Shield fell through the first floor and kept going - this is the",
+        "warning that it is close to gone.",
+    ];
+
+    public static readonly string[] LowLifeTier3 =
+    [
+        "Shield genuinely empty, or as close to it as you set this: the last",
+        "press before life itself starts taking hits.",
+        "",
+        "This floor alone waits for a real, sustained empty reading rather",
+        "than firing on the first frame that says zero - a raw zero is",
+        "exactly what a misread or a covered, blind globe looks like too.",
+    ];
+
     public static readonly string[] AnyWindow =
     [
         "Clears the window filter, so it fires into whatever has focus.",

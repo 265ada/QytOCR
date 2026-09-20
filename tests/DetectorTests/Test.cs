@@ -616,6 +616,17 @@ static class T
             bool enabledButNoRegion = MonitorEngine.AnyPoolWatchedWithText(
                 new WatcherConfig { Enabled = true, UseText = true }, Off(), Off());
 
+            // Low Life setup reads shield without shield's own Enabled ever
+            // being true - see Sample()'s entry gate - so this needs its own
+            // way to count shield as watched, or the overlay goes right back
+            // to thinking a menu covers a HUD it is reading just fine.
+            WatcherConfig ShieldTextOnly() => new() { Enabled = false, UseText = true,
+                TextRegion = Box.From(new Rectangle(0, 0, 40, 20)) };
+            bool shieldViaLowLife = MonitorEngine.AnyPoolWatchedWithText(
+                Off(), Off(), ShieldTextOnly(), lowLifeEnabled: true);
+            bool shieldTextOnlyWithoutLowLife = MonitorEngine.AnyPoolWatchedWithText(
+                Off(), Off(), ShieldTextOnly(), lowLifeEnabled: false);
+
             Console.WriteLine((lifeOnly ? "PASS" : "FAIL")
                               + "  hud-watch: life alone watched with text -> counts");
             Console.WriteLine((manaOnlyLifeDisabled ? "PASS" : "FAIL")
@@ -626,6 +637,10 @@ static class T
                               + "  hud-watch: nothing watched -> does not count");
             Console.WriteLine((!enabledButNoRegion ? "PASS" : "FAIL")
                               + "  hud-watch: enabled but no region drawn yet -> does not count");
+            Console.WriteLine((shieldViaLowLife ? "PASS" : "FAIL")
+                              + "  hud-watch: shield.Enabled off but Low Life setup on -> still counts");
+            Console.WriteLine((!shieldTextOnlyWithoutLowLife ? "PASS" : "FAIL")
+                              + "  hud-watch: same shield config without Low Life setup -> does not count");
         }
 
         // Whether a single missed window lookup should actually pause the OCR
@@ -655,6 +670,50 @@ static class T
                               + $"  game-gone: gone {grace + 1}ms -> no longer counts as running");
             Console.WriteLine((!neverSeen ? "PASS" : "FAIL")
                               + "  game-gone: never seen at all (sentinel) -> not running");
+        }
+
+        // Low Life setup: three floors on shield, each firing once per
+        // crossing and rearming only once shield has climbed back out with
+        // margin - the same shape as the app's other emergency nets.
+        {
+            bool crossedFloor = MonitorEngine.LowLifeTierMayFire(false, 0.12, 0.15);
+            bool alreadyFired = MonitorEngine.LowLifeTierMayFire(true, 0.12, 0.15);
+            bool notCrossedYet = MonitorEngine.LowLifeTierMayFire(false, 0.20, 0.15);
+            bool exactlyOnFloor = MonitorEngine.LowLifeTierMayFire(false, 0.15, 0.15);
+
+            Console.WriteLine((crossedFloor ? "PASS" : "FAIL")
+                              + "  low-life tier: below the floor, never fired -> may fire");
+            Console.WriteLine((!alreadyFired ? "PASS" : "FAIL")
+                              + "  low-life tier: below the floor but already fired -> holds");
+            Console.WriteLine((!notCrossedYet ? "PASS" : "FAIL")
+                              + "  low-life tier: still above the floor -> does not fire");
+            Console.WriteLine((exactlyOnFloor ? "PASS" : "FAIL")
+                              + "  low-life tier: exactly on the floor -> may fire");
+
+            const double margin = MonitorEngine.LowLifeRearmMargin;
+            bool notRearmedYet = MonitorEngine.LowLifeTierRearmed(0.15 + margin, 0.15);
+            bool rearmedPastMargin = MonitorEngine.LowLifeTierRearmed(0.15 + margin + 0.001, 0.15);
+            bool stillBelowFloor = MonitorEngine.LowLifeTierRearmed(0.10, 0.15);
+
+            Console.WriteLine((!notRearmedYet ? "PASS" : "FAIL")
+                              + "  low-life rearm: exactly on the margin -> not rearmed yet");
+            Console.WriteLine((rearmedPastMargin ? "PASS" : "FAIL")
+                              + "  low-life rearm: just past the margin -> rearmed");
+            Console.WriteLine((!stillBelowFloor ? "PASS" : "FAIL")
+                              + "  low-life rearm: still below the floor -> not rearmed");
+
+            const long confirm = MonitorEngine.LowLifeZeroConfirmMs;
+            bool neverBelowZero = MonitorEngine.LowLifeZeroConfirmed(long.MinValue / 2, 10_000, confirm);
+            bool justArrived = MonitorEngine.LowLifeZeroConfirmed(10_000, 10_000, confirm);
+            bool confirmedNow = MonitorEngine.LowLifeZeroConfirmed(10_000 - confirm, 10_000, confirm);
+
+            Console.WriteLine((!neverBelowZero ? "PASS" : "FAIL")
+                              + "  low-life zero-confirm: never seen at zero -> not confirmed");
+            Console.WriteLine((!justArrived ? "PASS" : "FAIL")
+                              + "  low-life zero-confirm: arrived this instant -> not confirmed yet "
+                              + "(one frame is exactly what a misread looks like)");
+            Console.WriteLine((confirmedNow ? "PASS" : "FAIL")
+                              + $"  low-life zero-confirm: held for the full {confirm}ms -> confirmed");
         }
 
         // Whether the overlay should still treat a quiet numbers box as a menu

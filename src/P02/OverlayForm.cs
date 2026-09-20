@@ -44,6 +44,14 @@ public sealed class OverlayForm : Form
     private GlobeReading _mana = new("Mana", 0, false, "off");
     private double _lifeTrigger = 0.5;
     private double _manaTrigger = 0.3;
+
+    /// <summary>
+    /// Low Life setup: the first row is showing shield, not life, since
+    /// shield is the number actually worth watching for that build - the
+    /// reading and trigger passed in are already shield's, this only changes
+    /// the label and tally letters drawn beside them.
+    /// </summary>
+    private bool _firstIsShield;
     private bool _armed;
     private bool _firing;
     private int _fired;
@@ -218,12 +226,13 @@ public sealed class OverlayForm : Form
     }
 
     public void Show(GlobeReading life, GlobeReading mana,
-                     double lifeTrigger, double manaTrigger)
+                     double lifeTrigger, double manaTrigger, bool firstIsShield = false)
     {
         _life = life;
         _mana = mana;
         _lifeTrigger = lifeTrigger;
         _manaTrigger = manaTrigger;
+        _firstIsShield = firstIsShield;
 
         _detail = life.Note.Length > 0 ? life.Note : Source(life.TextRaw);
 
@@ -634,8 +643,8 @@ public sealed class OverlayForm : Form
         int y = Pad;
         if (LifeShown)
         {
-            Row(g, "Life", _life, _lifeTrigger, _lifeKey, y, Theme.Good, LifeRed,
-                    _lifeFires);
+            Row(g, _firstIsShield ? "Shield" : "Life", _life, _lifeTrigger, _lifeKey, y,
+                    Theme.Good, LifeRed, _lifeFires);
             y += RowH;
         }
 
@@ -731,7 +740,7 @@ public sealed class OverlayForm : Form
         // is the part you read at a glance, and it was the right size already.
         // "HP" says everything the word "Life" said in half the room, so the
         // count goes where the word was and the bar keeps every pixel it had.
-        string tag = name == "Life" ? "HP" : "MP";
+        string tag = name == "Life" ? "HP" : name == "Shield" ? "ES" : "MP";
         string tally = fires > 0 || _inCombat ? $"{tag} {fires}" : tag;
         Glyph(g, tally, _inCombat ? tallyInk : Theme.Dim, Theme.UiBold, Pad, y + 1);
 

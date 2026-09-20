@@ -179,7 +179,8 @@ public sealed class MainForm : Form
                                   _engine.ProbeText);
 
         _life = new GlobePanel("Life", cfg.Life, blue: false, Save,
-            () => _cfg.WindowMatch, () => _cfg.Mana.Region, probe, cfg.Shield, FindAllNumbers)
+            () => _cfg.WindowMatch, () => _cfg.Mana.Region, probe, cfg.Shield, FindAllNumbers,
+            cfg)
             { Location = new Point(12, 36) };
         _mana = new GlobePanel("Mana", cfg.Mana, blue: true, Save,
             () => _cfg.WindowMatch, () => _cfg.Life.Region, probe, null, FindAllNumbers)
@@ -1799,11 +1800,20 @@ public sealed class MainForm : Form
 
                     if (_overlay.Visible)
                     {
-                        _overlay.LifeWatched = _cfg.Life.Enabled;
+                        // Low Life setup makes shield, not life, the number
+                        // actually worth watching - it fires life's flask,
+                        // but off shield's level, so shield is what belongs
+                        // where the HP row normally sits.
+                        bool lowLife = _cfg.LowLifeEnabled;
+                        var firstRow = lowLife ? shield : life;
+                        double firstTrigger = lowLife ? _cfg.LowLifeTier1 : _cfg.Life.Threshold;
+
+                        _overlay.LifeWatched = lowLife || _cfg.Life.Enabled;
                         _overlay.ManaWatched = _cfg.Mana.Enabled;
-                        _overlay.SetKeys(_cfg.Life.Enabled ? _cfg.Life.Key.ToUpperInvariant() : "",
-                                         _cfg.Mana.Enabled ? _cfg.Mana.Key.ToUpperInvariant() : "");
-                        _overlay.Show(life, mana, _cfg.Life.Threshold, _cfg.Mana.Threshold);
+                        _overlay.SetKeys(
+                            lowLife || _cfg.Life.Enabled ? _cfg.Life.Key.ToUpperInvariant() : "",
+                            _cfg.Mana.Enabled ? _cfg.Mana.Key.ToUpperInvariant() : "");
+                        _overlay.Show(firstRow, mana, firstTrigger, _cfg.Mana.Threshold, lowLife);
                         _overlay.SetFightCount(_engine.FiresThisFightFor("Life"),
                                                _engine.FiresThisFightFor("Mana"),
                                                _engine.InCombat);

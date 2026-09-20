@@ -302,6 +302,29 @@ public sealed class AppConfig
         { Hue = "red", Key = "1", Threshold = 0.50, TextLabel = "Shield" };
 
     /// <summary>
+    /// A separate "oh shit" net for a low-life build, where energy shield -
+    /// not life - is the pool that actually absorbs hits. Reads shield
+    /// through the exact same trusted pipeline as everything else, but fires
+    /// the life flask off shield's own three floors instead of shield's own
+    /// threshold. Mutually exclusive with Shield.Enabled's older meaning
+    /// ("Also fire for energy shield"): that one assumes a flask refills
+    /// shield directly, which this one does not assume at all.
+    /// </summary>
+    public bool LowLifeEnabled { get; set; }
+
+    /// <summary>First floor: one press when shield first drops below this.</summary>
+    public double LowLifeTier1 { get; set; } = 0.15;
+
+    /// <summary>Second floor, further down: one more press.</summary>
+    public double LowLifeTier2 { get; set; } = 0.05;
+
+    /// <summary>
+    /// Shield genuinely empty, or as close to it as this is set: the last
+    /// press before life itself starts taking hits.
+    /// </summary>
+    public double LowLifeTier3 { get; set; } = 0.0;
+
+    /// <summary>
     /// How long life must go without dropping before a fight counts as over.
     /// Only drops count as fighting: every class regenerates, so a rise means
     /// nothing is hitting you.

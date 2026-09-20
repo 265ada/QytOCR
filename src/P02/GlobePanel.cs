@@ -36,6 +36,15 @@ public sealed class GlobePanel : Card
     private readonly NumericUpDown _shieldMax = new();
     private readonly Label _shieldRead = new();
     private readonly Label _tuned = new();
+
+    // Also only the life panel: Low Life setup needs the whole config, not
+    // just shield's, since it is a separate on/off from shield's own and its
+    // three floors live at the top level rather than on any one pool.
+    private readonly AppConfig? _app;
+    private readonly CheckBox _lowLifeOn = new();
+    private readonly NumericUpDown _lowLifeTier1 = new();
+    private readonly NumericUpDown _lowLifeTier2 = new();
+    private readonly NumericUpDown _lowLifeTier3 = new();
     private readonly Label _warn = new();
     private readonly KeyBindBox _key = new();
     private readonly ComboBox _pad = new();
@@ -63,11 +72,13 @@ public sealed class GlobePanel : Card
 
     public GlobePanel(string title, WatcherConfig cfg, bool blue, Action onChange,
                       Func<string> windowMatch, Func<Box?> otherRegion, TextProbe probe,
-                      WatcherConfig? shield = null, Action? findNumbers = null)
+                      WatcherConfig? shield = null, Action? findNumbers = null,
+                      AppConfig? app = null)
     {
         _findNumbers = findNumbers;
         _probe = probe;
         _shield = shield;
+        _app = app;
         _cfg = cfg;
         _blue = blue;
         _onChange = onChange;
@@ -373,6 +384,7 @@ public sealed class GlobePanel : Card
         y += 26;
 
         if (_shield is not null) y = AddShield(y);
+        if (_shield is not null && _app is not null) y = AddLowLife(y);
 
         // Hold time and press count multiply out into how long a trigger takes
         // to send, and nothing else can go out during it. Worth seeing.
@@ -501,7 +513,16 @@ public sealed class GlobePanel : Card
         _shieldOn.Checked = _shield!.Enabled;
         _shieldOn.SetBounds(14, y, 190, 22);
         _shieldOn.CheckedChanged += (_, _) =>
-        { _shield.Enabled = _shieldOn.Checked; _onChange(); };
+        {
+            _shield.Enabled = _shieldOn.Checked;
+            if (_shieldOn.Checked && _app is not null && _lowLifeOn.Checked)
+            {
+                _app.LowLifeEnabled = false;
+                _lowLifeOn.Checked = false;
+                RefreshLowLifeEnabled();
+            }
+            _onChange();
+        };
         Controls.Add(_shieldOn);
         Tips.On(_shieldOn, Tips.ShieldOn);
 
@@ -551,9 +572,9 @@ public sealed class GlobePanel : Card
             + Environment.NewLine
             + "nothing above or below. Not the life line: this is a separate reading."
             + Environment.NewLine + Environment.NewLine
-            + "Only needed if Also fire for energy shield is ticked, and only if"
+            + "Only needed if Also fire for energy shield or Low life setup is"
             + Environment.NewLine
-            + "Find numbers could not locate it.");
+            + "ticked, and only if Find numbers could not locate it.");
 
         Controls.Add(Lab("My max shield", 102, y + 3, Tips.ShieldMax));
         _shieldMax.SetBounds(190, y, 72, 24);
@@ -577,6 +598,89 @@ public sealed class GlobePanel : Card
             + "set up at all.");
         RefreshShieldWarning();
         return y + 22;
+    }
+
+    /// <summary>
+    /// A separate "oh shit" net for a low-life build: shield's own reading
+    /// decides when to drink the life flask, at three floors instead of
+    /// shield's own single threshold. Mutually exclusive with "Also fire for
+    /// energy shield" above - the two checkboxes clear each other, since only
+    /// one firing system may ever act on shield's drop at a time.
+    /// </summary>
+    private int AddLowLife(int y)
+    {
+        Controls.Add(new Label
+        {
+            Bounds = new Rectangle(14, y, 352, 2),
+            BorderStyle = BorderStyle.Fixed3D,
+        });
+        y += 10;
+
+        _lowLifeOn.Text = "Low life setup (heal off energy shield)";
+        _lowLifeOn.Checked = _app!.LowLifeEnabled;
+        _lowLifeOn.SetBounds(14, y, 260, 22);
+        _lowLifeOn.CheckedChanged += (_, _) =>
+        {
+            _app.LowLifeEnabled = _lowLifeOn.Checked;
+            if (_lowLifeOn.Checked && _shieldOn.Checked) _shieldOn.Checked = false;
+            RefreshLowLifeEnabled();
+            _onChange();
+        };
+        Controls.Add(_lowLifeOn);
+        Tips.On(_lowLifeOn, Tips.LowLifeOn);
+        y += 28;
+
+        Controls.Add(Lab("First below", 14, y + 4, Tips.LowLifeTier1));
+        _lowLifeTier1.SetBounds(140, y, 56, 24);
+        _lowLifeTier1.Minimum = 0;
+        _lowLifeTier1.Maximum = 80;
+        _lowLifeTier1.Value = (decimal)Math.Clamp(_app.LowLifeTier1 * 100, 0, 80);
+        _lowLifeTier1.ValueChanged += (_, _) =>
+        { _app.LowLifeTier1 = (double)_lowLifeTier1.Value / 100.0; _onChange(); };
+        Controls.Add(_lowLifeTier1);
+        Tips.On(_lowLifeTier1, Tips.LowLifeTier1);
+        Controls.Add(Lab("%", 200, y + 4));
+        y += 28;
+
+        Controls.Add(Lab("Second below", 14, y + 4, Tips.LowLifeTier2));
+        _lowLifeTier2.SetBounds(140, y, 56, 24);
+        _lowLifeTier2.Minimum = 0;
+        _lowLifeTier2.Maximum = 50;
+        _lowLifeTier2.Value = (decimal)Math.Clamp(_app.LowLifeTier2 * 100, 0, 50);
+        _lowLifeTier2.ValueChanged += (_, _) =>
+        { _app.LowLifeTier2 = (double)_lowLifeTier2.Value / 100.0; _onChange(); };
+        Controls.Add(_lowLifeTier2);
+        Tips.On(_lowLifeTier2, Tips.LowLifeTier2);
+        Controls.Add(Lab("%", 200, y + 4));
+        y += 28;
+
+        Controls.Add(Lab("Third at/below", 14, y + 4, Tips.LowLifeTier3));
+        _lowLifeTier3.SetBounds(140, y, 56, 24);
+        _lowLifeTier3.Minimum = 0;
+        _lowLifeTier3.Maximum = 30;
+        _lowLifeTier3.Value = (decimal)Math.Clamp(_app.LowLifeTier3 * 100, 0, 30);
+        _lowLifeTier3.ValueChanged += (_, _) =>
+        { _app.LowLifeTier3 = (double)_lowLifeTier3.Value / 100.0; _onChange(); };
+        Controls.Add(_lowLifeTier3);
+        Tips.On(_lowLifeTier3, Tips.LowLifeTier3);
+        Controls.Add(Lab("%", 200, y + 4));
+        y += 30;
+
+        RefreshLowLifeEnabled();
+        return y;
+    }
+
+    /// <summary>
+    /// The old shield checkbox turning on clears this one, the same way this
+    /// one clears it - checked from here too so either direction keeps the
+    /// tier fields' enabled state honest without a second event to forget.
+    /// </summary>
+    private void RefreshLowLifeEnabled()
+    {
+        bool on = _lowLifeOn.Checked;
+        _lowLifeTier1.Enabled = on;
+        _lowLifeTier2.Enabled = on;
+        _lowLifeTier3.Enabled = on;
     }
 
     /// <summary>
@@ -654,7 +758,8 @@ public sealed class GlobePanel : Card
             RefreshShieldWarning();
             return;
         }
-        if (!_shield.Enabled)
+        bool lowLife = _app?.LowLifeEnabled ?? false;
+        if (!_shield.Enabled && !lowLife)
         {
             _shieldRead.Text = "Shield: not watched";
             _shieldRead.ForeColor = SystemColors.GrayText;
@@ -667,7 +772,8 @@ public sealed class GlobePanel : Card
             return;
         }
         _shieldRead.Text = $"Shield: {r.TextRaw}  ({r.Fraction * 100:0} %)";
-        _shieldRead.ForeColor = r.Fraction < _shield.Threshold
+        double warnBelow = lowLife ? _app!.LowLifeTier1 : _shield.Threshold;
+        _shieldRead.ForeColor = r.Fraction < warnBelow
             ? Color.FromArgb(190, 60, 0)
             : Color.FromArgb(0, 100, 0);
     }
