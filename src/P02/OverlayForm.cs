@@ -499,9 +499,22 @@ public sealed class OverlayForm : Form
     private bool ManaShown => ShowMana && ManaWatched
                               && !(_mana.Note == "off" && !_mana.Ok);
 
+    /// <summary>Whether life is being watched at all, which the row follows.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(
+        System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool LifeWatched { get; set; } = true;
+
+    /// <summary>
+    /// Same question as ManaShown, asked of life. Life never had the on/off
+    /// menu toggle mana has - most builds do watch it - but it had exactly
+    /// the same bug: the row was drawn unconditionally, so "Watch my life"
+    /// unchecked still left a life bar sitting there with nothing behind it.
+    /// </summary>
+    private bool LifeShown => LifeWatched && !(_life.Note == "off" && !_life.Ok);
+
     private void FitHeight()
     {
-        int h = Pad + RowH + (ManaShown ? RowH : 0) + 26
+        int h = Pad + (LifeShown ? RowH : 0) + (ManaShown ? RowH : 0) + 26
                 + (_alert.Length > 0 ? AlertLine + 8 : 0) + Pad;
 
         // The alert wraps within the width the readout already has. Growing the
@@ -619,9 +632,12 @@ public sealed class OverlayForm : Form
             g.FillPath(ghost, path);
 
         int y = Pad;
-        Row(g, "Life", _life, _lifeTrigger, _lifeKey, y, Theme.Good, LifeRed,
-                _lifeFires);
-        y += RowH;
+        if (LifeShown)
+        {
+            Row(g, "Life", _life, _lifeTrigger, _lifeKey, y, Theme.Good, LifeRed,
+                    _lifeFires);
+            y += RowH;
+        }
 
         if (ManaShown)
         {
@@ -730,8 +746,18 @@ public sealed class OverlayForm : Form
         using (var path = Rounded(bar, radius))
             g.FillPath(bed, path);
 
+        // A note - "numbers not trusted", "no effect - waiting" and the like
+        // - used to blank the bar and print the bare word "held" in its
+        // place, for every one of them, including the ones that still carry
+        // a perfectly real reading (Ok is true; a bridged safety net has
+        // already fired on it if it needed to). That made a pool that is
+        // being watched correctly, just not confidently enough to act on its
+        // own, look indistinguishable from one nothing is reading at all -
+        // "nonstop held" on a HUD that never actually stopped tracking mana.
+        // Ok already means there is a real number to show; the note earns a
+        // warning colour, not a blank bar.
         bool held = r.Note.Length > 0;
-        if (r.Ok && !held)
+        if (r.Ok)
         {
             var inner = new Rectangle(bar.X + 1, bar.Y + 1, bar.Width - 2, bar.Height - 2);
             int w = (int)Math.Round(inner.Width * Math.Clamp(r.Fraction, 0, 1));
@@ -758,7 +784,6 @@ public sealed class OverlayForm : Form
             g.DrawPath(edge, path);
 
         string right = !r.Ok ? (r.Note.Length > 0 ? r.Note : "--")
-                     : held ? "held"
                      : $"{r.Fraction * 100:0}%";
         var colour = !r.Ok ? Theme.Dim
                    : held ? Theme.Warn

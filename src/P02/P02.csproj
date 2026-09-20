@@ -15,7 +15,7 @@
     <Product>QytOCR</Product>
     <AssemblyTitle>QytOCR</AssemblyTitle>
 
-    <Version>3.0.6</Version>
+    <Version>3.0.7</Version>
 
     <!-- One file, no runtime prerequisite: the whole app is the exe you share. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
