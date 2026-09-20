@@ -1573,15 +1573,23 @@ public sealed class GlobePanel : Card
             _bar.Below = false;
             return;
         }
-        _bar.Value = r.Fraction;
-        _bar.Below = r.Fraction < _cfg.Threshold;
+
+        // "last known X%" is MonitorEngine's own marker for a value carried
+        // forward through a real reading gap, not read this poll - it can
+        // sit at a comfortable-looking level for as long as the gap lasts
+        // while the pool underneath it is actually critical. Showing it
+        // confidently as the current reading is what let a shield genuinely
+        // near zero display as a calm, steady 100%.
+        bool stale = MonitorEngine.IsStaleCarry(r.TextRaw);
+        _bar.Value = stale ? 0 : r.Fraction;
+        _bar.Below = !stale && r.Fraction < _cfg.Threshold;
         // The percentage, and what it is a percentage of. "60.1 %" on its own
         // is the number nobody could check, and checking it is what every
         // argument about this came down to.
         string exact = Numbers(r.TextRaw);
-        _pct.Text = exact.Length > 0
-            ? $"{r.Fraction * 100:0.0} %      {exact}"
-            : $"{r.Fraction * 100:0.0} %";
+        _pct.Text = stale ? "stale reading - see below"
+                  : exact.Length > 0 ? $"{r.Fraction * 100:0.0} %      {exact}"
+                  : $"{r.Fraction * 100:0.0} %";
 
         if (r.FromText && r.TextRaw.Length > 0)
         {

@@ -1060,7 +1060,7 @@ public sealed class MonitorEngine : IDisposable
                     // Same bar every other press in this app has to clear:
                     // only while armed, and only while the game is actually
                     // focused.
-                    if (Armed && focused) LowLifeCheck(sr, t0);
+                    if (Armed && focused) LowLifeCheck(shield, sr, t0);
                 }
                 else _lowLifeWasEnabled = false;
 
@@ -1335,6 +1335,29 @@ public sealed class MonitorEngine : IDisposable
     internal static bool LowLifeZeroConfirmed(long belowSinceMs, long nowMs, long confirmMs)
         => belowSinceMs != long.MinValue / 2 && nowMs - belowSinceMs >= confirmMs;
 
+    /// <summary>
+    /// Whether a reading's Fraction is a value carried forward through a real
+    /// gap rather than read this poll - "last known X%" is the one marker
+    /// Sample() writes for exactly that, when betterWanted/HadGoodSource
+    /// substitutes an old value in for a missing fresh one. Shared by every
+    /// display that shows a GlobeReading and by Low Life setup's own rearm
+    /// check, so all three treat "stale" the same way rather than three
+    /// separately-maintained guesses at it.
+    /// </summary>
+    internal static bool IsStaleCarry(string textRaw)
+        => textRaw.StartsWith("last known", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether a Low Life tier may rearm from this reading: only ever a
+    /// reading that is both Ok and carries no note at all - never a stale
+    /// carried-forward value, which can sit at a comfortable level for as
+    /// long as a real reading gap lasts while the pool underneath it is
+    /// still critical. Rearming every tier off that value is exactly how
+    /// this stayed quiet through a shield actually carved to nothing.
+    /// </summary>
+    internal static bool LowLifeMayRearm(bool ok, string note, double frac, double floor)
+        => ok && note.Length == 0 && LowLifeTierRearmed(frac, floor);
+
     /// <summary>What to do when memory and the numbers name different maxima.</summary>
     internal enum Verdict
     {
@@ -1529,24 +1552,45 @@ public sealed class MonitorEngine : IDisposable
     /// separate from shield's own threshold/panic/emergency-net firing, which
     /// is suppressed for the whole time this is on - see the early return
     /// for "Shield" inside Sample() itself.
+    ///
+    /// Takes shield's State as well as its latest GlobeReading because the
+    /// two answer different questions: the reading says what to show and
+    /// whether it is fresh enough to rearm on; the State's own
+    /// LastTrustedFrac/AtMs - set only where a reading passed the full trust
+    /// gate - is what firing bridges through a hold from, exactly like the
+    /// app's other emergency nets.
     /// </summary>
-    private void LowLifeCheck(GlobeReading shield, long now)
+    private void LowLifeCheck(State shieldState, GlobeReading shield, long now)
     {
-        if (!shield.Ok)
+        // Rearming - "shield has recovered enough to protect again" - only
+        // ever happens off a reading that is fully trusted this exact poll
+        // (Ok, and no note at all), never off shield.Fraction on its own.
+        // During a real reading gap that value can be MonitorEngine's own
+        // "last known X%" carried forward from before the gap started - a
+        // comfortable-looking number that says nothing about the pool right
+        // now, and rearming every tier off it is exactly how this stayed
+        // quiet through a shield that had actually been carved to nothing.
+        double fresh = shield.Fraction;
+        if (LowLifeMayRearm(shield.Ok, shield.Note, fresh, _cfg.LowLifeTier1))
+            _lowLifeTier1Fired = false;
+        if (LowLifeMayRearm(shield.Ok, shield.Note, fresh, _cfg.LowLifeTier2))
+            _lowLifeTier2Fired = false;
+        if (LowLifeMayRearm(shield.Ok, shield.Note, fresh, _cfg.LowLifeTier3))
+            _lowLifeTier3Fired = false;
+
+        // Firing may still act on the last reading that genuinely passed the
+        // trust gate, bridged briefly through a hold - the same discipline
+        // the app's other emergency nets already use - rather than either
+        // refusing outright the moment shield's reading is not fresh, or
+        // trusting a stale value that happens to look safe. Past the bridge
+        // window there is nothing left to act on either way.
+        if (!SafetyNetMayBridge(shieldState.LastTrustedAtMs, now, SafetyNetBridgeMs))
         {
-            // Nothing to judge by. Left armed rather than reset, so a real
-            // reading resuming a moment later does not find every tier
-            // freshly rearmed and able to double-fire on a level it was
-            // already sitting under before the gap.
             _lowLifeZeroSinceMs = long.MinValue / 2;
             return;
         }
 
-        double frac = shield.Fraction;
-
-        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier1)) _lowLifeTier1Fired = false;
-        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier2)) _lowLifeTier2Fired = false;
-        if (LowLifeTierRearmed(frac, _cfg.LowLifeTier3)) _lowLifeTier3Fired = false;
+        double frac = shieldState.LastTrustedFrac;
 
         if (frac <= _cfg.LowLifeTier3)
         {

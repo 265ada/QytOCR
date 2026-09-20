@@ -765,8 +765,18 @@ public sealed class OverlayForm : Form
         // "nonstop held" on a HUD that never actually stopped tracking mana.
         // Ok already means there is a real number to show; the note earns a
         // warning colour, not a blank bar.
-        bool held = r.Note.Length > 0;
-        if (r.Ok)
+        //
+        // Except when that number is not real right now. "Stale and real
+        // beats fresh and wrong" is the right call for a firing decision
+        // bridging a brief gap, and the wrong one for a display that just
+        // sat on a confident 100% while shield had actually been carved
+        // down to nothing during a real reading gap - "last known X%" is
+        // MonitorEngine's own marker for exactly that carried-forward,
+        // possibly-long-stale value, and this is the one place showing it
+        // as though it were current would have cost someone their character.
+        bool stale = MonitorEngine.IsStaleCarry(r.TextRaw);
+        bool held = r.Note.Length > 0 && stale;
+        if (r.Ok && !stale)
         {
             var inner = new Rectangle(bar.X + 1, bar.Y + 1, bar.Width - 2, bar.Height - 2);
             int w = (int)Math.Round(inner.Width * Math.Clamp(r.Fraction, 0, 1));
@@ -793,6 +803,7 @@ public sealed class OverlayForm : Form
             g.DrawPath(edge, path);
 
         string right = !r.Ok ? (r.Note.Length > 0 ? r.Note : "--")
+                     : held ? "held"
                      : $"{r.Fraction * 100:0}%";
         var colour = !r.Ok ? Theme.Dim
                    : held ? Theme.Warn

@@ -716,6 +716,45 @@ static class T
                               + $"  low-life zero-confirm: held for the full {confirm}ms -> confirmed");
         }
 
+        // The bug that nearly cost someone their character: a value carried
+        // forward through a real reading gap ("last known X%") looking
+        // exactly like a fresh, comfortable reading. Showing it as current,
+        // or rearming a tier off it, is how a shield genuinely near zero
+        // displayed as a calm 100% while nothing protected it.
+        {
+            bool staleDetected = MonitorEngine.IsStaleCarry("last known 100%");
+            bool freshNotStale = MonitorEngine.IsStaleCarry("memory, shield 930/930");
+            bool emptyNotStale = MonitorEngine.IsStaleCarry("");
+
+            Console.WriteLine((staleDetected ? "PASS" : "FAIL")
+                              + "  stale-carry: \"last known X%\" is recognised as stale");
+            Console.WriteLine((!freshNotStale ? "PASS" : "FAIL")
+                              + "  stale-carry: a fresh memory/numbers reading is not stale");
+            Console.WriteLine((!emptyNotStale ? "PASS" : "FAIL")
+                              + "  stale-carry: an empty TextRaw is not stale");
+
+            // The exact scenario: shield reads a stale, carried-forward 100%
+            // (Ok true, but a note is present) while the real pool could be
+            // anywhere. That must never be treated as "shield recovered."
+            bool staleHighDoesNotRearm = MonitorEngine.LowLifeMayRearm(
+                ok: true, note: "no exact reading yet", frac: 1.0, floor: 0.15);
+            bool freshHighDoesRearm = MonitorEngine.LowLifeMayRearm(
+                ok: true, note: "", frac: 1.0, floor: 0.15);
+            bool notOkDoesNotRearm = MonitorEngine.LowLifeMayRearm(
+                ok: false, note: "off", frac: 1.0, floor: 0.15);
+            bool freshButStillLowDoesNotRearm = MonitorEngine.LowLifeMayRearm(
+                ok: true, note: "", frac: 0.10, floor: 0.15);
+
+            Console.WriteLine((!staleHighDoesNotRearm ? "PASS" : "FAIL")
+                              + "  low-life rearm: a stale 100% (noted, not fresh) does NOT rearm");
+            Console.WriteLine((freshHighDoesRearm ? "PASS" : "FAIL")
+                              + "  low-life rearm: a fresh, un-noted 100% does rearm");
+            Console.WriteLine((!notOkDoesNotRearm ? "PASS" : "FAIL")
+                              + "  low-life rearm: not Ok at all does not rearm");
+            Console.WriteLine((!freshButStillLowDoesNotRearm ? "PASS" : "FAIL")
+                              + "  low-life rearm: fresh but still below the floor does not rearm");
+        }
+
         // Whether the overlay should still treat a quiet numbers box as a menu
         // covering the HUD rather than give up and show anyway. A box that has
         // never read at all never counts as covered (nothing to be patient
